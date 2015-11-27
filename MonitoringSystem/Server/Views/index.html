@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>KGC 2015 Demo</title>
+        <link href="../Content/bootstrap-3.3.5-dist/css/bootstrap.min.css" rel="stylesheet">
+        <script type="text/javascript" src="../Content/bootstrap-3.3.5-dist/js/bootstrap.js"></script>
+        <script type="text/javascript" src="../Content/jquery-2.1.4.min.js"></script>
+    </head>
+    <body>
+        <h1>KGC 2015 Demo 서버 관리</h1>
+        <label id="lb_current_status">init...</label>
+        </br>
+
+        <div id="admin_login_form" class="form-inline">
+          <label for="lb_admin_id">관리자 ID: </label>
+          <input type="text" id="admin_id" class="form-control">
+          <label for="lb_admin_pw">관리자 암호: </label>
+          <input type="password" id="admin_pw" class="form-control">
+          <button id="btn_admin_login" class="btn btn-primary">로그인</button>
+        </div>
+        </br>
+
+	      <table id="tb_agentlist" class="table table-bordered table-hover">
+          <tr><th>Agent IP</th><th>애플리케이션 이름</th><th>상태</th><th>CPU 점유율(%)</th><th>메모리 사용량(MB)</th></tr>
+        </table>
+
+        <button id="btn_app_start" class="btn btn-primary">[???]서버 실행</button></br></br>
+        <button id="btn_app_stop" class="btn btn-primary">[???]서버 종료</button></br></br>
+        <button id="btn_app_patch" class="btn btn-primary">[???]서버 패치</button>
+        </br></br>
+
+        <button id="btn_test" class="btn btn-primary">[테스트]</button>
+
+
+        <script type="text/javascript">
+            // 페이지 첫 로딩 시 해야할 일 기술
+            $(document).ready(function(){
+                document.getElementById("btn_test").style.visibility = "hidden";
+            });
+
+            // 주기적으로 해야할 일 기술
+            function loop(){
+                PostRequestAgentListRefresh();
+                setTimeout(loop,1000);
+            }
+            loop();
+
+
+            // 로그 추가와 삭제
+            function removeLog($index) {
+                var $elementReference = document.getElementById("logList");
+                $elementReference.remove( $index );
+            }
+            function addLog(logMsg) {
+                urTime = new Date();
+
+                var $elementReference = document.getElementById("logList");
+                var $option = document.createElement("option");
+                $option.text = "[" + curTime.toLocaleTimeString() +"] " + logMsg;
+                $elementReference.add( $option );
+            }
+
+
+            // agent 들의 정보를 표에 출력한다.
+            function SetAgentList(agentList)
+            {
+              $('#tb_agentlist').find("tr:gt(0)").remove();
+
+              for(var i = 0; i < agentList.count; ++i)
+              {
+                var appServerList = jQuery.parseJSON(agentList.appServerList[i]);
+                //alert(JSON.stringify(appServerList));
+                for(var j = 0 ; j < appServerList.length; ++j)
+                {
+                  //alert(JSON.stringify(appServerList[j]));
+                  var newRow = '<tr><td>' + appServerList[j].AgentIP + '</td><td>' + appServerList[j].AppTitleName + '</td><td>' + appServerList[j].AppStatus + '</td><td>' + appServerList[j].Process_CPU_Percent + '</td><td>' + appServerList[j].App_Memory_MB + '</td></tr>';
+                  $('#tb_agentlist').append(newRow);
+                }
+              }
+
+              $('#tb_agentlist').find('tr').click( function(){
+                var ip = $(this).find('td:nth-child(1)').text();
+                var appName = $(this).find('td:nth-child(2)').text();
+
+                if(ip)
+                {
+                  var lebel = ip + "##" + appName;
+                  //alert('You clicked ' + row);
+                  $('#btn_app_start').text(lebel + " 서버 실행 하기");
+                  $('#btn_app_stop').text(lebel + " 서버 종료 하기");
+                  $('#btn_app_patch').text(lebel + " 서버 패치 하기");
+                }
+              });
+            }
+
+            // Agent 상태 갱신을 요청한다
+            function PostRequestAgentListRefresh() {
+              $.ajax({
+                type: "POST",
+                url: "/json/RequestRefresh",
+                data: "{}",
+                contentType: "application/json; charset=utf-8",
+                dataType: "json",
+                success: function (msg) {
+                   //alert(JSON.stringify(msg));
+                   SetAgentList(msg);
+
+                   // 현재 로그인한 관리자가 있는지 조사
+                   if(msg.adminUserID.length > 0)
+                   {
+                     ViewAdminStatus(msg.adminUserID);
+                   }
+                   else {
+                     ViewAdminStatus("없음");
+                   }
+                },
+                error: function (xhr, ajaxOptions, thrownError) {
+                  var error = "xhr.statusText: " + xhr.statusText + ",  xhr.responseText:" + xhr.responseText;
+                  $("#debugOutput").html(error);
+                   //alert(xhr.statusText); //alert(xhr.responseText); //alert(xhr.status); //alert(thrownError);
+                   ViewAdminStatus("없음");
+                }
+             });
+            }
+
+            //애플리케이션 시작 요청
+            $("#btn_app_start").click(function(){
+              var returnValue = GetIPandAppName($(this).text());
+              if(returnValue.IsValid == true)
+              {
+                PostRequestAdminCommand("START_SERVER", returnValue.IP, returnValue.AppTitle);
+              }
+            });
+
+            // 애플리케이션 종료 요청
+            $("#btn_app_stop").click(function(){
+              var returnValue = GetIPandAppName($(this).text());
+              if(returnValue.IsValid == true)
+              {
+                PostRequestAdminCommand("STOP_SERVER", returnValue.IP, returnValue.AppTitle);
+              }
+            });
+
+            // 애플리케이션 패치 요청.
+            $("#btn_app_patch").click(function(){
+              var returnValue = GetIPandAppName($(this).text());
+              if(returnValue.IsValid == true)
+              {
+                PostRequestAdminCommand("PATCH_SERVER", returnValue.IP, returnValue.AppTitle);
+              }
+            });
+
+            // 문자열에서 IP의 애플리케이션 이름을 추출한다
+            function GetIPandAppName(text)
+            {
+              var returnValue = {};
+              returnValue.IsValid = false;
+
+              //var test = "127.0.0.1##Login 서버 실행하기";
+              var tokens = text.split(' ');
+              if(tokens.length > 1)
+              {
+              	var tokens2 = tokens[0].split('##');
+                if(tokens2.length == 2)
+                {
+                  returnValue.IsValid = true;
+                  returnValue.IP = tokens2[0];
+                  returnValue.AppTitle = tokens2[1];
+                  return returnValue;
+              	}
+              }
+
+              return returnValue;
+            }
+
+            // 관리자 명령 요청
+            function PostRequestAdminCommand(command, agentIP, appServer) {
+              var sendData = {
+                 UserID: AdminInfo.UserID,
+                 AuthToken: AdminInfo.AuthToken,
+                 AgentIP : agentIP,
+                 Command : command,
+                 AppServer : appServer
+              };
+              //alert(JSON.stringify(sendData));
+              $.ajax({
+                type: "POST",
+                url: "/json/RequestCommand",
+                data: JSON.stringify(sendData),
+                contentType: "application/json; charset=utf-8",
+                dataType: "json",
+                success: function (msg) {
+                  //$("#debugOutput").html(JSON.stringify(msg));
+                  addLog(JSON.stringify(msg));
+                },
+                error: function (xhr, ajaxOptions, thrownError) {
+                  var error = "xhr.statusText: " + xhr.statusText + ",  xhr.responseText:" + xhr.responseText;
+                  addLog(error);
+                }
+             });
+            }
+
+            // 관리자 정보
+            var AdminInfo = {
+               UserID: "test",
+               Password: "test",
+               AuthToken: "test"
+            };
+
+            $("#btn_admin_login").click(function(){
+              AdminInfo.UserID = $("#admin_id").val();
+              AdminInfo.Password = $("#admin_pw").val();
+
+              if(AdminInfo.UserID.length == 0 || AdminInfo.Password.length == 0)
+              {
+                alert("관리자 계정 정보를 채워주세요!!!");
+                return;
+              }
+
+              PostRequestAdminLogin();
+            });
+
+            // 관리자 상태를 출력한다
+            function ViewAdminStatus(adminUserID)
+            {
+              curTime = new Date();
+              $("#lb_current_status").html(curTime.toLocaleTimeString() + "  " + "현재 로그인 중인 관리자: " + adminUserID);
+            }
+
+            // 관리자 로그인 요청
+            function PostRequestAdminLogin() {
+              $.ajax({
+                type: "POST",
+                url: "/json/RequestAdminLogin",
+                data: JSON.stringify(AdminInfo),
+                contentType: "application/json; charset=utf-8",
+                dataType: "json",
+                success: function (msg) {
+                  //alert(JSON.stringify(msg));
+                  if(msg.result == "Ok")
+                  {
+                    AdminInfo.AuthToken = msg.authToken;
+                    $("#admin_login_form").html("");
+                  }
+                  else
+                  {
+                    addLog("관리자 로그인 실패: " + msg.result);
+                  }
+                },
+                error: function (xhr, ajaxOptions, thrownError) {
+                  var error = "xhr.statusText: " + xhr.statusText + ",  xhr.responseText:" + xhr.responseText;
+                  addLog(error);
+                }
+             });
+            }
+
+////////////////////////////////////////////////////////////////////
+///////////// Test Function start
+///////////// 테스트를 할 때는 해당 테스트의 id 이름을 btn_test 로 변경해야 한다
+////////////////////////////////////////////////////////////////////
+            $("#test_etc").click(function(){
+                var text = "127.0.0.1##Login 서버 실행하기";
+                var returnValue = GetIPandAppName(text);
+                if(returnValue.IsValid == true)
+                {
+                  alert(returnValue.IP + "  " + returnValue.AppTitle);
+                }
+            });
+
+            $("#test_add_td").click(function(){
+                $('#tb_agentlist').append('<tr><td>127.0.0.1</td><td>Login</td><td>Stop</td><td>3</td><td>2</td></tr>');
+                $('#tb_agentlist').append('<tr><td>127.0.0.2</td><td>Login</td><td>Stop</td><td>3</td><td>2</td></tr>');
+
+                $('#tb_agentlist').find('tr').click( function(){
+                  var row = $(this).find('td:nth-child(2)').text();
+                  if(row)
+                  {
+                    //alert('You clicked ' + row);
+                    $('#btn_app_start').text(row + " 서버 실행 하기");
+                    $('#btn_app_stop').text(row + " 서버 종료 하기");
+                    $('#btn_app_patch').text(row + " 서버 패치 하기");
+                  }
+                });
+
+            });
+
+            $("#test_remove_td").click(function(){
+                $('#tb_agentlist').find("tr:gt(0)").remove();
+            });
+
+            $("#test_add_td_json").click(function(){
+                //$('#tb_agentlist').find("tr:gt(0)").remove();
+                /*var agentList = [
+                    "count": 2,
+                    "appServerList":
+                    [
+                      {
+                          "IP": "127.0.0.1",
+                          "AppServers": "Login",
+                          "Status":"Stop"
+                      },
+                      {
+                          "IP": "127.0.0.1",
+                          "AppServers": "Game",
+                          "Status":"Stop"
+                      }
+                    ]
+                ];
+                */
+                //SetAgentList(agentList);
+            });
+
+            $("#test_request_agentList").click(function(){
+                PostRequestAgentList();
+            });
+////////////////////////////////////////////////////////////////////
+///////////// Test Function end
+////////////////////////////////////////////////////////////////////
+        </script>
+
+        <!-- 로그 출력을 위한 리스트 박스 -->
+        <select multiple class="form-control" id="logList" style="height:220px">
+        </select>
+
+        <!-- 개발 시 디버깅을 위한 출력 -->
+        <div id="debugOutput" />
+	  </body>
+</html>
